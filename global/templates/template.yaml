@@ -1,0 +1,228 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWSCommonSettings/global creates global settings on N.Virginia Region.
+
+Parameters:
+  ACMValidationMethod:
+    Type: String
+    Default: DNS
+    AllowedValues:
+     - DNS
+     - EMAIL
+  ACMDomainName:
+    Type: String
+    Default: ''
+  BillingAlertThreshold:
+    Type: Number
+    Default: 0
+    MinValue: 0
+  CloudFrontErrorRateThreshold:
+    Type: Number
+    Default: 0
+    MinValue: 0
+  CloudFrontErrorRequestPerMinuteThreshold:
+    Type: Number
+    Default: 0
+    MinValue: 0
+  CloudFrontBytesDownloadedPerMinuteThreshold:
+    Type: Number
+    Default: 0
+    MinValue: 0
+  CloudFrontDistributionId:
+    Type: String
+    Default: ''
+  TagKey:
+    Type: String
+    Default: createdby
+  TagValue:
+    Type: String
+    Default: aws:cloudformation:stack
+
+Conditions:
+  CreateACMCertificate:
+    !Not [ !Equals [ !Ref ACMDomainName, '' ] ]
+  CreateCloudWatchAlarmBilling:
+    !Not [ !Equals [ !Ref BillingAlertThreshold, 0 ] ]
+  CreateCloudWatchAlarmCloudFrontErrorRate:
+    !And [ !Not [ !Equals [ !Ref CloudFrontErrorRateThreshold, 0 ] ], !Not [ !Equals [ !Ref CloudFrontDistributionId, ''] ] ]
+  CreateCloudWatchAlarmCloudFrontRequests:
+    !And [ !Not [ !Equals [ !Ref CloudFrontErrorRequestPerMinuteThreshold, 0 ] ], !Not [ !Equals [ !Ref CloudFrontDistributionId, ''] ] ]
+  CreateCloudWatchAlarmCloudFrontBytesDownloaded:
+    !And [ !Not [ !Equals [ !Ref CloudFrontBytesDownloadedPerMinuteThreshold, 0 ] ], !Not [ !Equals [ !Ref CloudFrontDistributionId, ''] ] ]
+
+Resources:
+  CertificateManager:
+    Condition: CreateACMCertificate
+    Type: 'AWS::CertificateManager::Certificate'
+    Properties: 
+      DomainName: !Ref ACMDomainName
+      ValidationMethod: !Ref ACMValidationMethod
+      Tags:
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  CloudWatchAlarmBilling:
+    Condition: CreateCloudWatchAlarmBilling
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: !Sub '**概算請求金額* が *${BillingAlertThreshold}00円を超過* しています。'
+      AlarmName: !Sub 'Warning-${AWS::StackName}-EstimatedCharges-is-Over-${BillingAlertThreshold}00-Yen'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      EvaluationPeriods: 1
+      MetricName: EstimatedCharges
+      Namespace: AWS/Billing
+      OKActions:
+        - !Ref SNSAlert
+      Period: 21600
+      Statistic: Maximum
+      Threshold: !Ref BillingAlertThreshold
+      TreatMissingData: notBreaching
+  CloudWatchAlarmCloudFront4xxErrorRate:
+    Condition: CreateCloudWatchAlarmCloudFrontErrorRate
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*CloudFront* の *4XXエラー率が増加* しています。'
+      AlarmName: !Sub 'Warning-${AWS::StackName}-CloudFront-4XXErrorRate-Increased'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: Region
+          Value: Global
+        - Name: DistributionId
+          Value: !Ref CloudFrontDistributionId 
+      EvaluationPeriods: 1
+      MetricName: 4xxErrorRate
+      Namespace: AWS/CloudFront
+      OKActions:
+        - !Ref SNSAlert
+      Period: 300
+      Statistic: Average
+      Threshold: !Ref CloudFrontErrorRateThreshold
+      TreatMissingData: notBreaching
+  CloudWatchAlarmCloudFront5xxErrorRate:
+    Condition: CreateCloudWatchAlarmCloudFrontErrorRate
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*CloudFront* の *5XXエラー率が増加* しています。'
+      AlarmName: !Sub 'Warning-${AWS::StackName}-CloudFront-5XXErrorRate-Increased'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: Region
+          Value: Global
+        - Name: DistributionId
+          Value: !Ref CloudFrontDistributionId 
+      EvaluationPeriods: 1
+      MetricName: 5xxErrorRate
+      Namespace: AWS/CloudFront
+      OKActions:
+        - !Ref SNSAlert
+      Period: 300
+      Statistic: Average
+      Threshold: !Ref CloudFrontErrorRateThreshold
+      TreatMissingData: notBreaching
+  CloudWatchAlarmCloudFrontTotalErrorRate:
+    Condition: CreateCloudWatchAlarmCloudFrontErrorRate
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*CloudFront* の *エラー率が増加* しています。'
+      AlarmName: !Sub 'Warning-${AWS::StackName}-CloudFront-TotalErrorRate-Increased'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: Region
+          Value: Global
+        - Name: DistributionId
+          Value: !Ref CloudFrontDistributionId 
+      EvaluationPeriods: 1
+      MetricName: TotalErrorRate
+      Namespace: AWS/CloudFront
+      OKActions:
+        - !Ref SNSAlert
+      Period: 300
+      Statistic: Average
+      Threshold: !Ref CloudFrontErrorRateThreshold
+      TreatMissingData: notBreaching
+  CloudWatchAlarmCloudFrontRequests:
+    Condition: CreateCloudWatchAlarmCloudFrontRequests
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*CloudFront* の *リクエスト数が増加* しています。'
+      AlarmName: !Sub 'Warning-${AWS::StackName}-CloudFront-Requests-Increased'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: Region
+          Value: Global
+        - Name: DistributionId
+          Value: !Ref CloudFrontDistributionId 
+      EvaluationPeriods: 1
+      MetricName: Requests
+      Namespace: AWS/CloudFront
+      OKActions:
+        - !Ref SNSAlert
+      Period: 60
+      Statistic: Maximum
+      Threshold: !Ref CloudFrontErrorRequestPerMinuteThreshold
+      TreatMissingData: notBreaching
+  CloudWatchAlarmCloudFrontBytesDownloaded:
+    Condition: CreateCloudWatchAlarmCloudFrontBytesDownloaded
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*CloudFront* の *ダウンロードサイズが増加* しています。'
+      AlarmName: !Sub 'Warning-${AWS::StackName}-CloudFront-BytesDownloaded-Increased'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: Region
+          Value: Global
+        - Name: DistributionId
+          Value: !Ref CloudFrontDistributionId 
+      EvaluationPeriods: 1
+      MetricName: BytesDownloaded
+      Namespace: AWS/CloudFront
+      OKActions:
+        - !Ref SNSAlert
+      Period: 60
+      Statistic: Maximum
+      Threshold: !Ref CloudFrontBytesDownloadedPerMinuteThreshold
+      TreatMissingData: notBreaching
+  SNSAlert:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: !Sub 'System Notifications from ${AWS::StackName}'
+      TopicName: !Sub '${AWS::StackName}-system-notifications'
+  SNSAlertTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      Topics: 
+        - !Ref SNSAlert
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            # All AWS Services
+            Principal:
+              AWS: '*'
+            Resource: '*'
+            Action: 'SNS:Publish'
+    
+Outputs:
+  AmazonResourceNameOfACM:
+    Condition: CreateACMCertificate
+    Description: CertificateManager ARN
+    Value: !Ref CertificateManager

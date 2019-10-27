@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWSCommonSettings/security sets basic configurations for security.
+
+Parameters:
+  AuditOtherRegions:
+    Type: String
+    Default: Enabled
+    AllowedValues:
+     - Enabled
+     - Disabled
+  AutoRemediation:
+    Type: String
+    Default: Enabled
+    AllowedValues:
+     - Enabled
+     - Disabled
+  TagKey:
+    Type: String
+    Default: createdby
+  TagValue:
+    Type: String
+    Default: aws:cloudformation:stack
+
+Resources:
+  # Nested Stack
+  SecurityHub:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters: 
+        SnsTopicARN: !Ref SNSAlert
+      NotificationARNs: 
+        - !Ref SNSAlert
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/security/securityhub.yaml
+  Inspector:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      NotificationARNs: 
+        - !Ref SNSAlert
+      Parameters: 
+        PrefixOfLogicalName: !Ref AWS::StackName
+        TagKey: !Ref TagKey
+        TagValue: !Ref TagValue
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/security/inspector.yaml
+  GuardDuty:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      NotificationARNs: 
+        - !Ref SNSAlert
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/security/guardduty.yaml 
+  CloudTrail:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      NotificationARNs: 
+        - !Ref SNSAlert
+      Parameters: 
+        AuditOtherRegions: !Ref AuditOtherRegions
+        LogBacketName: !Ref S3ForAccessLog
+        PrefixOfLogicalName: !Ref AWS::StackName
+        SnsTopicARN: !Ref SNSAlert
+        SnsTopicName: !GetAtt SNSAlert.TopicName
+        TagKey: !Ref TagKey
+        TagValue: !Ref TagValue
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/security/cloudtrail.yaml
+  Config:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      NotificationARNs: 
+        - !Ref SNSAlert
+      Parameters: 
+        AuditOtherRegions: !Ref AuditOtherRegions
+        AutoRemediation: !Ref AutoRemediation
+        SnsTopicARN: !Ref SNSAlert
+        PrefixOfLogicalName: !Ref AWS::StackName
+        TagKey: !Ref TagKey
+        TagValue: !Ref TagValue
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/security/config.yaml
+  # S3
+  S3ForAccessLog:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: 
+          - ServerSideEncryptionByDefault: 
+              SSEAlgorithm: aws:kms
+      BucketName: !Sub defaultsecuritysettings-logs-${AWS::Region}-${AWS::AccountId}
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpirationInDays
+            ExpirationInDays: 60
+            Status: Enabled
+      PublicAccessBlockConfiguration: 
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  # SNS
+  SNSAlert:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: !Sub 'System Notifications from ${AWS::StackName}'
+      TopicName: !Sub '${AWS::StackName}-system-notifications'
+  SNSAlertTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      Topics: 
+        - !Ref SNSAlert
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            # All AWS Services
+            Principal:
+              AWS: '*'
+            Resource: '*'
+            Action: 'SNS:Publish'
+  SNSAlertForDeployment:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: !Sub 'Deployment Notifications from ${AWS::StackName}'
+      TopicName: !Sub '${AWS::StackName}-deployment-notifications'
+  SNSAlertTopicPolicyForDeployment:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      Topics: 
+        - !Ref SNSAlertForDeployment
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            # All AWS Services
+            Principal:
+              AWS: '*'
+            Resource: '*'
+            Action: 'SNS:Publish'
+  # CloudWatch Events for Health
+  CloudWatchEventsForHealth:
+    Type: 'AWS::Events::Rule'
+    Properties: 
+      Description: CloudWatch Events about AWS Health.
+      EventPattern:
+        source:
+          - aws.health
+      Name: AWS_Health
+      State: ENABLED
+      Targets:
+        - Arn: !Ref SNSAlert
+          Id: CloudWatchEventsForHealth

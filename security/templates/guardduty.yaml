@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWSCommonSettings/security/GuardDuty sets Amazon GuardDuty.
+
+Resources:
+  # Service-linked Role
+  ServiceLinkedRoleForGuardDuty:
+    Type: 'AWS::IAM::ServiceLinkedRole'
+    DeletionPolicy: Retain
+    Properties: 
+      AWSServiceName: guardduty.amazonaws.com
+      Description: A service-linked role required for Amazon GuardDuty to access your resources.
+  # GuardDuty
+  GuardDutyDetector:
+    DependsOn:
+      - ServiceLinkedRoleForGuardDuty
+    Type: 'AWS::GuardDuty::Detector'
+    Properties:
+      Enable: true

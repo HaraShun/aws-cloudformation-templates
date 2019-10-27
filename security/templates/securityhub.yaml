@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWSCommonSettings/security/SecurityHub sets AWS Security Hub.
+
+Parameters:
+  SnsTopicARN:
+    Type: String
+
+Resources:
+  # Service-linked Role
+  ServiceLinkedRoleForSecurityHub:
+    Type: 'AWS::IAM::ServiceLinkedRole'
+    DeletionPolicy: Retain
+    Properties: 
+      AWSServiceName: securityhub.amazonaws.com
+      Description: A service-linked role required for AWS Security Hub to access your resources.
+  # SecurityHub
+  SecurityHub:
+    DependsOn:
+      - ServiceLinkedRoleForSecurityHub
+    Type: 'AWS::SecurityHub::Hub'
+  # CloudWatch Events for SecurityHub
+  CloudWatchEventsForSecurityHub:
+    Type: 'AWS::Events::Rule'
+    Properties: 
+      Description: CloudWatch Events about SecurityHub.
+      EventPattern:
+        source:
+          - aws.securityhub
+        detail-type: 
+          - Security Hub Findings - Imported
+        # Events fired when status has been changed from PASSED to ARCHIVED.
+        detail:
+          findings:
+            Compliance:
+              Status:
+                - PASSED
+            RecordState:
+              - ARCHIVED
+      Name: AWS_Security_Hub
+      State: ENABLED
+      Targets:
+        - Arn: !Ref SnsTopicARN
+          Id: CloudWatchEventsForSecurityHub
