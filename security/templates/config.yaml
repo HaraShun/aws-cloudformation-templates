@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/security/config sets AWS Config.
+Description: AWSCloudFormationTemplates/security/config sets AWS Config.
 
 Parameters:
   AuditOtherRegions:

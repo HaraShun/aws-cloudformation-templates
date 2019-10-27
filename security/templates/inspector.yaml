@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/security/Inspector sets Amazon Inspector.
+Description: AWSCloudFormationTemplates/security/Inspector sets Amazon Inspector.
 
 Parameters:
   PrefixOfLogicalName:

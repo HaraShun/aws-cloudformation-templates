@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/static-web-hosting creates environment of static web hosting.
+Description: AWSCloudFormationTemplates/static-web-hosting creates environment of static web hosting.
 
 Parameters:
   CertificateManagerARN:

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/security sets basic configurations for security.
+Description: AWSCloudFormationTemplates/security sets basic configurations for security.
 
 Parameters:
   AuditOtherRegions:

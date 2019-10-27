@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/security/SecurityHub sets AWS Security Hub.
+Description: AWSCloudFormationTemplates/security/SecurityHub sets AWS Security Hub.
 
 Parameters:
   SnsTopicARN:

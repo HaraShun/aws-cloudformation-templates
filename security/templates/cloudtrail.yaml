@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/security/CloudTrail sets AWS CloudTrail.
+Description: AWSCloudFormationTemplates/security/CloudTrail sets AWS CloudTrail.
 
 Parameters:
   AuditOtherRegions:

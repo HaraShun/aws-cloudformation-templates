@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/security/GuardDuty sets Amazon GuardDuty.
+Description: AWSCloudFormationTemplates/security/GuardDuty sets Amazon GuardDuty.
 
 Resources:
   # Service-linked Role

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCommonSettings/global creates global settings on N.Virginia Region.
+Description: AWSCloudFormationTemplates/global creates global settings on N.Virginia Region.
 
 Parameters:
   ACMValidationMethod:
