@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWSCloudFormationTemplates/static-web-hosting/az creates a Subnet for Web Servers.
+
+Parameters:
+  AvailabilityZone:
+    Type: String
+    AllowedValues:
+      - a
+      - b
+      - c
+      - d
+  SubnetPublicCidrBlock:
+    Type: String
+    Default: 10.0.0.0/24
+    AllowedPattern: ^[0-9./]*$
+  SubnetExternalCidrBlock:
+    Type: String
+    Default: 10.0.1.0/24
+    AllowedPattern: ^[0-9./]*$
+  VPCId:
+    Type: String
+  InternetGatewayId:
+    Type: String
+  TagKey:
+    Type: String
+    Default: createdby
+  TagValue:
+    Type: String
+    Default: aws:cloudformation:stack
+
+Resources:
+  # Subnet
+  SubnetExternal:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}${AvailabilityZone}
+      CidrBlock: !Ref SubnetExternalCidrBlock
+      Tags:
+        - Key: Name
+          Value: !Sub subnet-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-ext
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+      VpcId: !Ref VPCId
+  SubnetPublic:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}${AvailabilityZone}
+      CidrBlock: !Ref SubnetPublicCidrBlock
+      Tags:
+        - Key: Name
+          Value: !Sub subnet-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-pub
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+      VpcId: !Ref VPCId
+  # Route Table
+  RouteTableExternal:
+    Type: 'AWS::EC2::RouteTable'
+    Properties: 
+      VpcId: !Ref VPCId
+      Tags:
+        - Key: Name
+          Value: !Sub rtb-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-ext
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  RouteExternalToNATGateway:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+      RouteTableId: !Ref RouteTableExternal
+  RouteTablePublic:
+    Type: 'AWS::EC2::RouteTable'
+    Properties: 
+      VpcId: !Ref VPCId
+      Tags:
+        - Key: Name
+          Value: !Sub rtb-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-pub
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  RoutePublicToInternetGateway:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGatewayId
+      RouteTableId: !Ref RouteTablePublic
+  RouteTableExternalAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties: 
+      RouteTableId: !Ref RouteTableExternal
+      SubnetId: !Ref SubnetExternal
+  RouteTablePublicAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties: 
+      RouteTableId: !Ref RouteTablePublic
+      SubnetId: !Ref SubnetPublic
+  # Elastic IP
+  EIPForNatGateway:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: !Ref VPCId
+      Tags:
+        - Key: Name
+          Value: !Sub eip-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-natgateway
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  EIPForNLB:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: !Ref VPCId
+      Tags:
+        - Key: Name
+          Value: !Sub eip-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-nlb
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  # NatGateway
+  NatGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties: 
+      AllocationId: !GetAtt EIPForNatGateway.AllocationId
+      SubnetId: !Ref SubnetPublic
+      Tags: 
+        - Key: Name
+          Value: !Sub nat-${AWS::StackName}-${AWS::Region}${AvailabilityZone}
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+
+Outputs:
+  SubnetId:
+    Description: Subnet ID
+    Value: !Ref SubnetPublic
+  NetworkLoadBalancerIPAllocationId:
+    Description: Internet GW IP
+    Value: !GetAtt EIPForNLB.AllocationId
+  NetworkLoadBalancerIP:
+    Description: Internet GW IP
+    Value: !Ref EIPForNLB
+  NatGatewayIP:
+    Description: NAT GW IP
+    Value: !Ref EIPForNatGateway

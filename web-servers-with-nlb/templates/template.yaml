@@ -1,0 +1,468 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWSCloudFormationTemplates/static-web-hosting creates a Network Load Balancer and EC2 instances for Web Servers.
+
+Parameters:
+  VPCCidrBlock:
+    Type: String
+    Default: 10.0.0.0/21
+    AllowedPattern: ^[0-9./]*$
+  SubnetPublicCidrBlockForAz1:
+    Type: String
+    Default: 10.0.0.0/24
+    AllowedPattern: ^[0-9./]*$
+  SubnetExternalCidrBlockForAz1:
+    Type: String
+    Default: 10.0.1.0/24
+    AllowedPattern: ^[0-9./]*$
+  AvailabilityZone1:
+    Type: String
+    Default: a
+    AllowedValues:
+      - a
+      - b
+      - c
+      - d
+  SubnetPublicCidrBlockForAz2:
+    Type: String
+    Default: 10.0.4.0/24
+    AllowedPattern: ^[0-9./]*$
+  SubnetExternalCidrBlockForAz2:
+    Type: String
+    Default: 10.0.5.0/24
+    AllowedPattern: ^[0-9./]*$
+  AvailabilityZone2:
+    Type: String
+    Default: c
+    AllowedValues:
+      - a
+      - b
+      - c
+      - d
+  AutoScalingVolumeSize:
+    Type: Number
+    Default: 8
+    MinValue: 8
+  AutoScalingImageId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-068a6cefc24c301d2
+  AutoScalingInstanceType:
+    Type: String
+    Default: t3.micro
+  AutoScalingDesiredCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 0
+  AutoScalingMaxSize:
+    Type: Number
+    Default: 1
+    MinValue: 0
+  AutoScalingKeyName:
+    Type: String
+    Default: ''
+  TagKey:
+    Type: String
+    Default: createdby
+  TagValue:
+    Type: String
+    Default: aws:cloudformation:stack
+
+Conditions:
+  KeyExists:
+    !Not [ !Equals [ !Ref AutoScalingKeyName, '' ] ]
+
+Resources:
+  # Subnet
+  Az1:
+    DependsOn:
+      # NATGateway requires provisioned Internet Gateway.
+      - InternetGatewayAttachment
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AvailabilityZone: !Ref AvailabilityZone1
+        SubnetPublicCidrBlock: !Ref SubnetPublicCidrBlockForAz1
+        SubnetExternalCidrBlock: !Ref SubnetExternalCidrBlockForAz1
+        VPCId: !Ref VPC
+        InternetGatewayId: !Ref InternetGateway
+        TagKey: !Ref TagKey
+        TagValue: !Ref TagValue
+      NotificationARNs: 
+        - !Ref SNSAlert
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers-with-nlb/az.yaml
+  Az2:
+    DependsOn:
+      # NATGateway requires provisioned Internet Gateway.
+      - InternetGatewayAttachment
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AvailabilityZone: !Ref AvailabilityZone2
+        SubnetPublicCidrBlock: !Ref SubnetPublicCidrBlockForAz2
+        SubnetExternalCidrBlock: !Ref SubnetExternalCidrBlockForAz2
+        VPCId: !Ref VPC
+        InternetGatewayId: !Ref InternetGateway
+        TagKey: !Ref TagKey
+        TagValue: !Ref TagValue 
+      NotificationARNs: 
+        - !Ref SNSAlert
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers-with-nlb/az.yaml
+  # Service-linked Role
+  ServiceLinkedRoleForAutoScaling:
+    Type: AWS::IAM::ServiceLinkedRole
+    DeletionPolicy: Retain
+    Properties: 
+      AWSServiceName: autoscaling.amazonaws.com
+      Description: Default Service-Linked Role enables access to AWS Services and Resources used or managed by Auto Scaling
+  # IAM
+  IAMRoleForVPCFlowLog:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Sub '${AWS::StackName}-AWSVPCFlowLogCloudWatchAccess-${AWS::Region}'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogGroups'
+                  - 'logs:DescribeLogStreams'
+                Resource: '*'
+      RoleName: !Sub '${AWS::StackName}-AWSVPCFlowLogRole-${AWS::Region}'
+      Tags:
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  IAMRoleForEC2:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+      RoleName: !Sub '${AWS::StackName}-AWSEC2Role-${AWS::Region}'
+      Tags:
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  # InstanceProfile
+  InstanceProfileForIAMRoleForEC2:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      InstanceProfileName: !Ref IAMRoleForEC2
+      Roles: 
+        - !Ref IAMRoleForEC2
+  # VPC
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties: 
+      CidrBlock: !Ref VPCCidrBlock
+      Tags:
+        - Key: Name
+          Value: !Sub vpc-${AWS::StackName}-${AWS::Region}
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  # Internet GW
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties: 
+      Tags:
+        - Key: Name
+          Value: !Sub igw-${AWS::StackName}-${AWS::Region}
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+  # NLB
+  NetworkLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Sub nlb-${AWS::StackName}
+      Scheme: internet-facing
+      SubnetMappings:
+        - SubnetId: !GetAtt Az1.Outputs.SubnetId
+          AllocationId: !GetAtt Az1.Outputs.NetworkLoadBalancerIPAllocationId
+        - SubnetId: !GetAtt Az2.Outputs.SubnetId
+          AllocationId: !GetAtt Az2.Outputs.NetworkLoadBalancerIPAllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub nlb-${AWS::StackName}-${AWS::Region}
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+      Type: network
+  NetworkLoadBalancerTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 3
+      Name: !Sub target-${AWS::StackName}
+      Port: 80
+      Protocol: TCP
+      Tags:
+        - Key: Name
+          Value: !Sub target-${AWS::StackName}-${AWS::Region}
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+      TargetType: instance
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref VPC
+  NetworkLoadBalancerListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties: 
+      DefaultActions:
+        - TargetGroupArn: !Ref NetworkLoadBalancerTargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref NetworkLoadBalancer
+      Port: 80
+      Protocol: TCP
+  # Auto Scaling Group
+  AutoScalingLaunchConfiguration:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties: 
+      AssociatePublicIpAddress: true
+      BlockDeviceMappings: 
+        - DeviceName: /dev/xvda
+          Ebs: 
+            DeleteOnTermination: true
+            VolumeSize: !Ref AutoScalingVolumeSize
+            VolumeType: gp2
+      EbsOptimized: true
+      ImageId: !Ref AutoScalingImageId
+      InstanceMonitoring: true
+      InstanceType: !Ref AutoScalingInstanceType
+      KeyName: !If
+        - KeyExists
+        - !Ref AutoScalingKeyName
+        - !Ref AWS::NoValue
+      LaunchConfigurationName: !Sub autoscalinglaunchconfiguration-${AWS::StackName}
+      SecurityGroups: 
+        - !Ref SecurityGroupWeb
+  AutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties: 
+      AutoScalingGroupName: !Sub autoscalinggroup-${AWS::StackName}
+      Cooldown: '300'
+      DesiredCapacity: !Ref AutoScalingDesiredCapacity
+      HealthCheckGracePeriod: 300
+      HealthCheckType: EC2
+      LaunchConfigurationName: !Ref AutoScalingLaunchConfiguration
+      MaxSize: !Ref AutoScalingMaxSize
+      MetricsCollection: 
+        - Granularity: 1Minute
+          Metrics:
+            - GroupMinSize
+            - GroupMaxSize
+            - GroupDesiredCapacity
+            - GroupInServiceInstances
+            - GroupPendingInstances
+            - GroupStandbyInstances
+            - GroupTerminatingInstances
+            - GroupTotalInstances
+      MinSize: '1'
+      NotificationConfigurations: 
+        - NotificationTypes: 
+            - autoscaling:EC2_INSTANCE_LAUNCH
+            - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+            - autoscaling:EC2_INSTANCE_TERMINATE
+            - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+            - autoscaling:TEST_NOTIFICATION
+          TopicARN: !Ref SNSAlert
+      ServiceLinkedRoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling
+      Tags:
+        - Key: !Ref TagKey
+          PropagateAtLaunch: true
+          Value: !Ref TagValue
+      TargetGroupARNs:
+        - !Join
+          - ''
+          - - !Sub 'arn:aws:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:'
+            - !GetAtt NetworkLoadBalancerTargetGroup.TargetGroupFullName
+      TerminationPolicies: 
+        - Default
+      VPCZoneIdentifier: 
+        - !GetAtt Az1.Outputs.SubnetId
+        - !GetAtt Az2.Outputs.SubnetId
+
+  # Security Group
+  SecurityGroupWeb:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties: 
+      # 'sg-' prefix is NOT permitted.
+      GroupName: !Sub sgp-${AWS::StackName}-${AWS::Region}-web
+      GroupDescription: Security Group for Web Server
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          Description: http
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: TCP
+        - CidrIp: 0.0.0.0/0
+          Description: https
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: TCP
+        - CidrIp: 0.0.0.0/0
+          Description: icmp
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: ICMP
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 0
+          ToPort: 0
+          IpProtocol: '-1'
+      Tags:
+        - Key: Name
+          Value: !Sub sgp-${AWS::StackName}-${AWS::Region}-web
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+      VpcId: !Ref VPC
+  # VPC FlowLog
+  VPCFlowLog:
+    Type: 'AWS::EC2::FlowLog'
+    Properties: 
+      DeliverLogsPermissionArn: !GetAtt IAMRoleForVPCFlowLog.Arn
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref CloudWatchLogsGroupForVPCFlowLog
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+  CloudWatchLogsGroupForVPCFlowLog:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/vpc/${AWS::StackName}'
+      RetentionInDays: 60
+  # SNS
+  SNSAlert:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: !Sub 'System Notifications from ${AWS::StackName}'
+      TopicName: !Sub '${AWS::StackName}-system-notifications'
+  # CloudWatch Alarm
+  AlarmSNSNumberOfNotificationsFailed:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: !Sub '*SNS* (${AWS::StackName}) で *通知エラー* が発生しています。'
+      AlarmName: !Sub 'Notice-${AWS::StackName}-SNS-NumberOfNotificationsFailed-Occured'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 1
+      Dimensions:
+        - Name: TopicName
+          Value: !GetAtt SNSAlert.TopicName
+      EvaluationPeriods: 1
+      MetricName: NumberOfNotificationsFailed
+      Namespace: AWS/SNS
+      OKActions:
+        - !Ref SNSAlert
+      Period: 60
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  EC2StatusCheckFailed:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*EC2* で *ステータスチェックエラー* が発生しています。'
+      AlarmName: !Sub 'Warning-${AWS::StackName}-EC2-StatusCheckFailed'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 1
+      EvaluationPeriods: 1
+      MetricName: StatusCheckFailed
+      Namespace: AWS/EC2
+      OKActions:
+        - !Ref SNSAlert
+      Period: 60
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  EC2CPUUtilization:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*EC2* で *CPU使用率が上昇* しています。'
+      AlarmName: !Sub 'Notice-${AWS::StackName}-EC2-CPU-Overloaded'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 1
+      EvaluationPeriods: 1
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      OKActions:
+        - !Ref SNSAlert
+      Period: 60
+      Statistic: Average
+      Threshold: 70
+      TreatMissingData: notBreaching
+  NatGatewayPacketsDropCount:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*NatGateway* で *パケット破棄* が発生しています。'
+      AlarmName: !Sub 'Notice-${AWS::StackName}-NatGateway-PacketsDropCount'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 1
+      EvaluationPeriods: 1
+      MetricName: PacketsDropCount
+      Namespace: AWS/NATGateway
+      OKActions:
+        - !Ref SNSAlert
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  NatGatewayErrorPortAllocation:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSAlert
+      AlarmDescription: '*NatGateway* で *送信先ポートが割り当てられませんでした* 。'
+      AlarmName: !Sub 'Notice-${AWS::StackName}-NatGateway-ErrorPortAllocation'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 1
+      EvaluationPeriods: 1
+      MetricName: ErrorPortAllocation
+      Namespace: AWS/NATGateway
+      OKActions:
+        - !Ref SNSAlert
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: notBreaching
+Outputs:
+  NatGatewayIP1:
+    Description: NatGateway IP
+    Value: !GetAtt Az1.Outputs.NatGatewayIP
+  NetworkLoadBalancerIP1:
+    Description: NetworkLoadBalancer IP
+    Value: !GetAtt Az1.Outputs.NetworkLoadBalancerIP
+  NatGatewayIP2:
+    Description: NatGateway IP
+    Value: !GetAtt Az2.Outputs.NatGatewayIP
+  NetworkLoadBalancerIP2:
+    Description: NetworkLoadBalancer IP
+    Value: !GetAtt Az2.Outputs.NetworkLoadBalancerIP
