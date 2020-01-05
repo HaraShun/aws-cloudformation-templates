@@ -2,52 +2,12 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: AWSCloudFormationTemplates/static-web-hosting creates a Network Load Balancer and EC2 instances for Web Servers.
 
 Parameters:
-  VPCCidrBlock:
+  AutoScalingConfig:
     Type: String
-    Default: 10.0.0.0/21
-    AllowedPattern: ^[0-9./]*$
-  SubnetPublicCidrBlockForAz1:
-    Type: String
-    Default: 10.0.0.0/24
-    AllowedPattern: ^[0-9./]*$
-  SubnetExternalCidrBlockForAz1:
-    Type: String
-    Default: 10.0.1.0/24
-    AllowedPattern: ^[0-9./]*$
-  AvailabilityZone1:
-    Type: String
-    Default: a
+    Default: Enabled
     AllowedValues:
-      - a
-      - b
-      - c
-      - d
-  SubnetPublicCidrBlockForAz2:
-    Type: String
-    Default: 10.0.4.0/24
-    AllowedPattern: ^[0-9./]*$
-  SubnetExternalCidrBlockForAz2:
-    Type: String
-    Default: 10.0.5.0/24
-    AllowedPattern: ^[0-9./]*$
-  AvailabilityZone2:
-    Type: String
-    Default: c
-    AllowedValues:
-      - a
-      - b
-      - c
-      - d
-  AutoScalingVolumeSize:
-    Type: Number
-    Default: 8
-    MinValue: 8
-  AutoScalingImageId:
-    Type: AWS::EC2::Image::Id
-    Default: ami-068a6cefc24c301d2
-  AutoScalingInstanceType:
-    Type: String
-    Default: t3.micro
+      - Enabled
+      - Disabled
   AutoScalingDesiredCapacity:
     Type: Number
     Default: 1
@@ -56,9 +16,55 @@ Parameters:
     Type: Number
     Default: 1
     MinValue: 0
-  AutoScalingKeyName:
+  AvailabilityZone1:
+    Type: String
+    Default: a
+    AllowedValues:
+      - a
+      - b
+      - c
+      - d
+  AvailabilityZone2:
+    Type: String
+    Default: c
+    AllowedValues:
+      - a
+      - b
+      - c
+      - d
+  EC2ImageId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-068a6cefc24c301d2
+  EC2InstanceType:
+    Type: String
+    Default: t3.micro
+  EC2KeyName:
     Type: String
     Default: ''
+  EC2VolumeSize:
+    Type: Number
+    Default: 8
+    MinValue: 8
+  SubnetPublicCidrBlockForAz1:
+    Type: String
+    Default: 10.0.0.0/24
+    AllowedPattern: ^[0-9./]*$
+  SubnetExternalCidrBlockForAz1:
+    Type: String
+    Default: 10.0.1.0/24
+    AllowedPattern: ^[0-9./]*$
+  SubnetPublicCidrBlockForAz2:
+    Type: String
+    Default: 10.0.4.0/24
+    AllowedPattern: ^[0-9./]*$
+  SubnetExternalCidrBlockForAz2:
+    Type: String
+    Default: 10.0.5.0/24
+    AllowedPattern: ^[0-9./]*$
+  VPCCidrBlock:
+    Type: String
+    Default: 10.0.0.0/21
+    AllowedPattern: ^[0-9./]*$
   TagKey:
     Type: String
     Default: createdby
@@ -67,8 +73,12 @@ Parameters:
     Default: aws:cloudformation:stack
 
 Conditions:
-  KeyExists:
-    !Not [ !Equals [ !Ref AutoScalingKeyName, '' ] ]
+  AutoScalingEnabled:
+    !Equals [ !Ref AutoScalingConfig, Enabled ]
+  PrivateSubnet1Exists:
+    !Not [ !Equals [ !Ref SubnetExternalCidrBlockForAz1, '' ] ]
+  PrivateSubnet2Exists:
+    !Not [ !Equals [ !Ref SubnetExternalCidrBlockForAz2, '' ] ]
 
 Resources:
   # Subnet
@@ -80,15 +90,17 @@ Resources:
     Properties:
       Parameters:
         AvailabilityZone: !Ref AvailabilityZone1
+        InternetGatewayId: !Ref InternetGateway
+        NetworkLoadBalancer: Enabled
+        PrefixOfLogicalName: !Ref AWS::StackName
         SubnetPublicCidrBlock: !Ref SubnetPublicCidrBlockForAz1
         SubnetExternalCidrBlock: !Ref SubnetExternalCidrBlockForAz1
         VPCId: !Ref VPC
-        InternetGatewayId: !Ref InternetGateway
         TagKey: !Ref TagKey
         TagValue: !Ref TagValue
       NotificationARNs: 
         - !Ref SNSAlert
-      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers-with-nlb/az.yaml
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers/az.yaml
   Az2:
     DependsOn:
       # NATGateway requires provisioned Internet Gateway.
@@ -97,22 +109,42 @@ Resources:
     Properties:
       Parameters:
         AvailabilityZone: !Ref AvailabilityZone2
+        InternetGatewayId: !Ref InternetGateway
+        NetworkLoadBalancer: Enabled
+        PrefixOfLogicalName: !Ref AWS::StackName
         SubnetPublicCidrBlock: !Ref SubnetPublicCidrBlockForAz2
         SubnetExternalCidrBlock: !Ref SubnetExternalCidrBlockForAz2
         VPCId: !Ref VPC
-        InternetGatewayId: !Ref InternetGateway
         TagKey: !Ref TagKey
         TagValue: !Ref TagValue 
       NotificationARNs: 
         - !Ref SNSAlert
-      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers-with-nlb/az.yaml
-  # Service-linked Role
-  ServiceLinkedRoleForAutoScaling:
-    Type: AWS::IAM::ServiceLinkedRole
-    DeletionPolicy: Retain
-    Properties: 
-      AWSServiceName: autoscaling.amazonaws.com
-      Description: Default Service-Linked Role enables access to AWS Services and Resources used or managed by Auto Scaling
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers/az.yaml
+  AutoScaling:
+    Condition: AutoScalingEnabled
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AutoScalingDesiredCapacity: !Ref AutoScalingDesiredCapacity
+        AutoScalingMaxSize: !Ref AutoScalingMaxSize
+        EC2IamInstanceProfileARN: !GetAtt InstanceProfileForIAMRoleForEC2.Arn
+        EC2ImageId: !Ref EC2ImageId
+        EC2InstanceType: !Ref EC2InstanceType
+        EC2KeyName: !Ref EC2KeyName
+        EC2SecurityGroupId: !Ref SecurityGroupWeb
+        EC2VolumeSize: !Ref EC2VolumeSize
+        EipAllocationId1ForNLB: !GetAtt Az1.Outputs.NetworkLoadBalancerIPAllocationId
+        EipAllocationId2ForNLB: !GetAtt Az2.Outputs.NetworkLoadBalancerIPAllocationId
+        PrefixOfLogicalName: !Ref AWS::StackName
+        SubnetId1ForNLB: !GetAtt Az1.Outputs.SubnetId
+        SubnetId2ForNLB: !GetAtt Az2.Outputs.SubnetId
+        SNSTopicARN: !Ref SNSAlert
+        VPCId: !Ref VPC
+        TagKey: !Ref TagKey
+        TagValue: !Ref TagValue 
+      NotificationARNs: 
+        - !Ref SNSAlert
+      TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers/autoscaling.yaml
   # IAM
   IAMRoleForVPCFlowLog:
     Type: 'AWS::IAM::Role'
@@ -188,117 +220,6 @@ Resources:
     Properties: 
       InternetGatewayId: !Ref InternetGateway
       VpcId: !Ref VPC
-  # NLB
-  NetworkLoadBalancer:
-    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
-    Properties:
-      Name: !Sub nlb-${AWS::StackName}
-      Scheme: internet-facing
-      SubnetMappings:
-        - SubnetId: !GetAtt Az1.Outputs.SubnetId
-          AllocationId: !GetAtt Az1.Outputs.NetworkLoadBalancerIPAllocationId
-        - SubnetId: !GetAtt Az2.Outputs.SubnetId
-          AllocationId: !GetAtt Az2.Outputs.NetworkLoadBalancerIPAllocationId
-      Tags:
-        - Key: Name
-          Value: !Sub nlb-${AWS::StackName}-${AWS::Region}
-        - Key: !Ref TagKey
-          Value: !Ref TagValue
-      Type: network
-  NetworkLoadBalancerTargetGroup:
-    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
-    Properties:
-      HealthCheckIntervalSeconds: 10
-      HealthCheckTimeoutSeconds: 10
-      HealthyThresholdCount: 3
-      Name: !Sub target-${AWS::StackName}
-      Port: 80
-      Protocol: TCP
-      Tags:
-        - Key: Name
-          Value: !Sub target-${AWS::StackName}-${AWS::Region}
-        - Key: !Ref TagKey
-          Value: !Ref TagValue
-      TargetType: instance
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VPC
-  NetworkLoadBalancerListener:
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties: 
-      DefaultActions:
-        - TargetGroupArn: !Ref NetworkLoadBalancerTargetGroup
-          Type: forward
-      LoadBalancerArn: !Ref NetworkLoadBalancer
-      Port: 80
-      Protocol: TCP
-  # Auto Scaling Group
-  AutoScalingLaunchConfiguration:
-    Type: 'AWS::AutoScaling::LaunchConfiguration'
-    Properties: 
-      AssociatePublicIpAddress: true
-      BlockDeviceMappings: 
-        - DeviceName: /dev/xvda
-          Ebs: 
-            DeleteOnTermination: true
-            VolumeSize: !Ref AutoScalingVolumeSize
-            VolumeType: gp2
-      EbsOptimized: true
-      ImageId: !Ref AutoScalingImageId
-      InstanceMonitoring: true
-      InstanceType: !Ref AutoScalingInstanceType
-      KeyName: !If
-        - KeyExists
-        - !Ref AutoScalingKeyName
-        - !Ref AWS::NoValue
-      LaunchConfigurationName: !Sub autoscalinglaunchconfiguration-${AWS::StackName}
-      SecurityGroups: 
-        - !Ref SecurityGroupWeb
-  AutoScalingGroup:
-    Type: 'AWS::AutoScaling::AutoScalingGroup'
-    Properties: 
-      AutoScalingGroupName: !Sub autoscalinggroup-${AWS::StackName}
-      Cooldown: '300'
-      DesiredCapacity: !Ref AutoScalingDesiredCapacity
-      HealthCheckGracePeriod: 300
-      HealthCheckType: EC2
-      LaunchConfigurationName: !Ref AutoScalingLaunchConfiguration
-      MaxSize: !Ref AutoScalingMaxSize
-      MetricsCollection: 
-        - Granularity: 1Minute
-          Metrics:
-            - GroupMinSize
-            - GroupMaxSize
-            - GroupDesiredCapacity
-            - GroupInServiceInstances
-            - GroupPendingInstances
-            - GroupStandbyInstances
-            - GroupTerminatingInstances
-            - GroupTotalInstances
-      MinSize: '1'
-      NotificationConfigurations: 
-        - NotificationTypes: 
-            - autoscaling:EC2_INSTANCE_LAUNCH
-            - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
-            - autoscaling:EC2_INSTANCE_TERMINATE
-            - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
-            - autoscaling:TEST_NOTIFICATION
-          TopicARN: !Ref SNSAlert
-      ServiceLinkedRoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling
-      Tags:
-        - Key: !Ref TagKey
-          PropagateAtLaunch: true
-          Value: !Ref TagValue
-      TargetGroupARNs:
-        - !Join
-          - ''
-          - - !Sub 'arn:aws:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:'
-            - !GetAtt NetworkLoadBalancerTargetGroup.TargetGroupFullName
-      TerminationPolicies: 
-        - Default
-      VPCZoneIdentifier: 
-        - !GetAtt Az1.Outputs.SubnetId
-        - !GetAtt Az2.Outputs.SubnetId
-
   # Security Group
   SecurityGroupWeb:
     Type: 'AWS::EC2::SecurityGroup'
@@ -455,14 +376,18 @@ Resources:
       TreatMissingData: notBreaching
 Outputs:
   NatGatewayIP1:
+    Condition: PrivateSubnet1Exists
     Description: NatGateway IP
     Value: !GetAtt Az1.Outputs.NatGatewayIP
   NetworkLoadBalancerIP1:
+    Condition: AutoScalingEnabled
     Description: NetworkLoadBalancer IP
     Value: !GetAtt Az1.Outputs.NetworkLoadBalancerIP
   NatGatewayIP2:
+    Condition: PrivateSubnet2Exists
     Description: NatGateway IP
     Value: !GetAtt Az2.Outputs.NatGatewayIP
   NetworkLoadBalancerIP2:
+    Condition: AutoScalingEnabled
     Description: NetworkLoadBalancer IP
     Value: !GetAtt Az2.Outputs.NetworkLoadBalancerIP

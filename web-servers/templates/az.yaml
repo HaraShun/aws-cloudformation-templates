@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWSCloudFormationTemplates/static-web-hosting/az creates a Subnet for Web Servers.
+Description: AWSCloudFormationTemplates/static-web-hosting/az creates a Subnet and related resources.
 
 Parameters:
   AvailabilityZone:
@@ -9,17 +9,25 @@ Parameters:
       - b
       - c
       - d
+  InternetGatewayId:
+    Type: String
+  NetworkLoadBalancer:
+    Default: Disabled
+    AllowedValues:
+      - Enabled
+      - Disabled
+    Type: String
+  PrefixOfLogicalName:
+    Type: String
+    Default: WebServers
   SubnetPublicCidrBlock:
     Type: String
     Default: 10.0.0.0/24
     AllowedPattern: ^[0-9./]*$
   SubnetExternalCidrBlock:
     Type: String
-    Default: 10.0.1.0/24
     AllowedPattern: ^[0-9./]*$
   VPCId:
-    Type: String
-  InternetGatewayId:
     Type: String
   TagKey:
     Type: String
@@ -28,16 +36,23 @@ Parameters:
     Type: String
     Default: aws:cloudformation:stack
 
+Conditions:
+  PrivateSubnetExists:
+    !Not [ !Equals [ !Ref SubnetExternalCidrBlock, '' ] ]
+  NetworkLoadBalancerExists:
+    !Equals [ !Ref NetworkLoadBalancer, Enabled ]
+
 Resources:
   # Subnet
   SubnetExternal:
+    Condition: PrivateSubnetExists
     Type: 'AWS::EC2::Subnet'
     Properties:
       AvailabilityZone: !Sub ${AWS::Region}${AvailabilityZone}
       CidrBlock: !Ref SubnetExternalCidrBlock
       Tags:
         - Key: Name
-          Value: !Sub subnet-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-ext
+          Value: !Sub subnet-${PrefixOfLogicalName}-${AWS::Region}${AvailabilityZone}-ext
         - Key: !Ref TagKey
           Value: !Ref TagValue
       VpcId: !Ref VPCId
@@ -48,21 +63,23 @@ Resources:
       CidrBlock: !Ref SubnetPublicCidrBlock
       Tags:
         - Key: Name
-          Value: !Sub subnet-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-pub
+          Value: !Sub subnet-${PrefixOfLogicalName}-${AWS::Region}${AvailabilityZone}-pub
         - Key: !Ref TagKey
           Value: !Ref TagValue
       VpcId: !Ref VPCId
   # Route Table
   RouteTableExternal:
+    Condition: PrivateSubnetExists
     Type: 'AWS::EC2::RouteTable'
     Properties: 
       VpcId: !Ref VPCId
       Tags:
         - Key: Name
-          Value: !Sub rtb-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-ext
+          Value: !Sub rtb-${PrefixOfLogicalName}-${AWS::Region}${AvailabilityZone}-ext
         - Key: !Ref TagKey
           Value: !Ref TagValue
   RouteExternalToNATGateway:
+    Condition: PrivateSubnetExists
     Type: 'AWS::EC2::Route'
     Properties:
       DestinationCidrBlock: 0.0.0.0/0
@@ -74,7 +91,7 @@ Resources:
       VpcId: !Ref VPCId
       Tags:
         - Key: Name
-          Value: !Sub rtb-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-pub
+          Value: !Sub rtb-${PrefixOfLogicalName}-${AWS::Region}${AvailabilityZone}-pub
         - Key: !Ref TagKey
           Value: !Ref TagValue
   RoutePublicToInternetGateway:
@@ -84,6 +101,7 @@ Resources:
       GatewayId: !Ref InternetGatewayId
       RouteTableId: !Ref RouteTablePublic
   RouteTableExternalAssociation:
+    Condition: PrivateSubnetExists
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties: 
       RouteTableId: !Ref RouteTableExternal
@@ -95,32 +113,35 @@ Resources:
       SubnetId: !Ref SubnetPublic
   # Elastic IP
   EIPForNatGateway:
+    Condition: PrivateSubnetExists
     Type: 'AWS::EC2::EIP'
     Properties:
       Domain: !Ref VPCId
       Tags:
         - Key: Name
-          Value: !Sub eip-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-natgateway
+          Value: !Sub eip-${PrefixOfLogicalName}-${AWS::Region}${AvailabilityZone}-natgateway
         - Key: !Ref TagKey
           Value: !Ref TagValue
   EIPForNLB:
+    Condition: NetworkLoadBalancerExists
     Type: 'AWS::EC2::EIP'
     Properties:
       Domain: !Ref VPCId
       Tags:
         - Key: Name
-          Value: !Sub eip-${AWS::StackName}-${AWS::Region}${AvailabilityZone}-nlb
+          Value: !Sub eip-${PrefixOfLogicalName}-${AWS::Region}${AvailabilityZone}-nlb
         - Key: !Ref TagKey
           Value: !Ref TagValue
   # NatGateway
   NatGateway:
+    Condition: PrivateSubnetExists
     Type: 'AWS::EC2::NatGateway'
     Properties: 
       AllocationId: !GetAtt EIPForNatGateway.AllocationId
       SubnetId: !Ref SubnetPublic
       Tags: 
         - Key: Name
-          Value: !Sub nat-${AWS::StackName}-${AWS::Region}${AvailabilityZone}
+          Value: !Sub nat-${PrefixOfLogicalName}-${AWS::Region}${AvailabilityZone}
         - Key: !Ref TagKey
           Value: !Ref TagValue
 
@@ -129,11 +150,14 @@ Outputs:
     Description: Subnet ID
     Value: !Ref SubnetPublic
   NetworkLoadBalancerIPAllocationId:
+    Condition: NetworkLoadBalancerExists
     Description: Internet GW IP
     Value: !GetAtt EIPForNLB.AllocationId
   NetworkLoadBalancerIP:
+    Condition: NetworkLoadBalancerExists
     Description: Internet GW IP
     Value: !Ref EIPForNLB
   NatGatewayIP:
+    Condition: PrivateSubnetExists
     Description: NAT GW IP
     Value: !Ref EIPForNatGateway
