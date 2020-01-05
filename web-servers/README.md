@@ -1,6 +1,6 @@
 # AWSCloudFormationTemplates/web-servers
 
-AWSCloudFormationTemplates/web-servers-with-nlb builds ``Network Load Balancer``, ``VPC`` and ``EC2`` instances and related resources for **website hosting**.
+AWSCloudFormationTemplates/web-servers builds ``Network Load Balancer``, ``VPC`` and ``EC2`` instances and related resources for **website hosting**.
 
 ## TL;DR
 
