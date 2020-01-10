@@ -151,13 +151,13 @@ Outputs:
     Value: !Ref SubnetPublic
   NetworkLoadBalancerIPAllocationId:
     Condition: NetworkLoadBalancerExists
-    Description: Internet GW IP
+    Description: Internet GW IP address
     Value: !GetAtt EIPForNLB.AllocationId
   NetworkLoadBalancerIP:
     Condition: NetworkLoadBalancerExists
-    Description: Internet GW IP
+    Description: Internet GW IP address
     Value: !Ref EIPForNLB
   NatGatewayIP:
     Condition: PrivateSubnetExists
-    Description: NAT GW IP
+    Description: NAT GW IP address
     Value: !Ref EIPForNatGateway

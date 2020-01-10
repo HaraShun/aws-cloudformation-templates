@@ -75,10 +75,14 @@ Parameters:
 Conditions:
   AutoScalingEnabled:
     !Equals [ !Ref AutoScalingConfig, Enabled ]
+  AutoScalingDisabled:
+    !Equals [ !Ref AutoScalingConfig, Disabled ]
   PrivateSubnet1Exists:
     !Not [ !Equals [ !Ref SubnetExternalCidrBlockForAz1, '' ] ]
   PrivateSubnet2Exists:
     !Not [ !Equals [ !Ref SubnetExternalCidrBlockForAz2, '' ] ]
+  KeyExists:
+    !Not [ !Equals [ !Ref EC2KeyName, '' ] ]
 
 Resources:
   # Subnet
@@ -91,7 +95,10 @@ Resources:
       Parameters:
         AvailabilityZone: !Ref AvailabilityZone1
         InternetGatewayId: !Ref InternetGateway
-        NetworkLoadBalancer: Enabled
+        NetworkLoadBalancer: !If 
+         - AutoScalingEnabled
+         - Enabled
+         - Disabled
         PrefixOfLogicalName: !Ref AWS::StackName
         SubnetPublicCidrBlock: !Ref SubnetPublicCidrBlockForAz1
         SubnetExternalCidrBlock: !Ref SubnetExternalCidrBlockForAz1
@@ -110,7 +117,10 @@ Resources:
       Parameters:
         AvailabilityZone: !Ref AvailabilityZone2
         InternetGatewayId: !Ref InternetGateway
-        NetworkLoadBalancer: Enabled
+        NetworkLoadBalancer: !If 
+         - AutoScalingEnabled
+         - Enabled
+         - Disabled
         PrefixOfLogicalName: !Ref AWS::StackName
         SubnetPublicCidrBlock: !Ref SubnetPublicCidrBlockForAz2
         SubnetExternalCidrBlock: !Ref SubnetExternalCidrBlockForAz2
@@ -145,6 +155,13 @@ Resources:
       NotificationARNs: 
         - !Ref SNSAlert
       TemplateURL: https://eijikominami.s3-ap-northeast-1.amazonaws.com/aws-cloudformation-templates/web-servers/autoscaling.yaml
+  # Service-linked Role
+  ServiceLinkedRoleForSSM:
+    Type: 'AWS::IAM::ServiceLinkedRole'
+    DeletionPolicy: Retain
+    Properties: 
+      AWSServiceName: ssm.amazonaws.com
+      Description: Provides access to AWS Resources managed or used by Amazon SSM.  
   # IAM
   IAMRoleForVPCFlowLog:
     Type: 'AWS::IAM::Role'
@@ -185,6 +202,7 @@ Resources:
             Action: 'sts:AssumeRole'
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMMaintenanceWindowRole
       RoleName: !Sub '${AWS::StackName}-AWSEC2Role-${AWS::Region}'
       Tags:
         - Key: !Ref TagKey
@@ -220,6 +238,53 @@ Resources:
     Properties: 
       InternetGatewayId: !Ref InternetGateway
       VpcId: !Ref VPC
+  # Elastic IP
+  EIPForEC2Instance:
+    Condition: AutoScalingDisabled
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub eip-${AWS::StackName}-${AWS::Region}-ec2
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  EIPAssociation:
+    Condition: AutoScalingDisabled
+    Type: AWS::EC2::EIPAssociation
+    Properties: 
+      AllocationId: !GetAtt EIPForEC2Instance.AllocationId
+      InstanceId: !Ref EC2
+  # EC2
+  EC2:
+    Condition: AutoScalingDisabled
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings: 
+        - DeviceName: /dev/xvda
+          Ebs: 
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: !Ref EC2VolumeSize
+            VolumeType: gp2
+      EbsOptimized: true
+      IamInstanceProfile: !Ref InstanceProfileForIAMRoleForEC2
+      ImageId: !Ref EC2ImageId
+      InstanceInitiatedShutdownBehavior: stop
+      InstanceType: !Ref EC2InstanceType
+      KeyName: !If
+        - KeyExists
+        - !Ref EC2KeyName
+        - !Ref AWS::NoValue
+      Monitoring: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroupWeb
+      SubnetId: !GetAtt Az1.Outputs.SubnetId
+      Tags: 
+        - Key: Name
+          Value: !Sub ec2-${AWS::StackName}-${AWS::Region}
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
   # Security Group
   SecurityGroupWeb:
     Type: 'AWS::EC2::SecurityGroup'
@@ -374,10 +439,71 @@ Resources:
       Statistic: Maximum
       Threshold: 1
       TreatMissingData: notBreaching
+  # SSM
+  MaintenanceWindow:
+    Type: AWS::SSM::MaintenanceWindow
+    Properties: 
+      AllowUnassociatedTargets: false
+      Cutoff: 1
+      Description: !Sub Create a backup AMI from ${AWS::StackName} EC2 instances at every midnights.
+      Duration: 2
+      Name: !Sub EveryMidnightsFor${AWS::StackName}
+      Schedule: cron(0 2 * * ? *)
+      ScheduleTimezone: Asia/Tokyo
+      Tags: 
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  MaintenanceWindowTarget:
+    Type: AWS::SSM::MaintenanceWindowTarget
+    Properties: 
+      Description: !Sub Create a backup AMI from ${AWS::StackName} EC2 instances.
+      Name: !Ref AWS::StackName
+      ResourceType: INSTANCE
+      Targets: !If
+        - AutoScalingDisabled
+        - - Key: InstanceIds
+            Values: 
+              - !Ref EC2
+        - !Ref AWS::NoValue
+      WindowId: !Ref MaintenanceWindow
+  MaintenanceWindowTask:
+    DependsOn:
+      - ServiceLinkedRoleForSSM
+    Type: AWS::SSM::MaintenanceWindowTask
+    Properties: 
+      Description: !Sub Create a backup AMI from ${AWS::StackName} EC2 instances.
+      MaxConcurrency: '1'
+      MaxErrors: '1'
+      Name: !Sub CreateImageOf${AWS::StackName}
+      Priority: 0
+      ServiceRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ssm.amazonaws.com/AWSServiceRoleForAmazonSSM
+      Targets: 
+        - Key: WindowTargetIds
+          Values: 
+            - !Ref MaintenanceWindowTarget
+      TaskArn: AWS-CreateImage
+      TaskInvocationParameters:
+        MaintenanceWindowAutomationParameters:
+          DocumentVersion: $LATEST
+          Parameters: !If
+           - AutoScalingDisabled
+           - InstanceId:
+             - !Ref EC2
+           - !Ref AWS::NoValue
+      TaskType: AUTOMATION
+      WindowId: !Ref MaintenanceWindow
+
 Outputs:
+  VPCCidrBlock:
+    Description: VPC CIDR Block
+    Value: !GetAtt VPC.CidrBlock   
+  EC2IP:
+    Condition: AutoScalingDisabled
+    Description: EC2 IP address
+    Value: !Ref EIPForEC2Instance
   NatGatewayIP1:
     Condition: PrivateSubnet1Exists
-    Description: NatGateway IP
+    Description: NatGateway IP address
     Value: !GetAtt Az1.Outputs.NatGatewayIP
   NetworkLoadBalancerIP1:
     Condition: AutoScalingEnabled
@@ -385,9 +511,9 @@ Outputs:
     Value: !GetAtt Az1.Outputs.NetworkLoadBalancerIP
   NatGatewayIP2:
     Condition: PrivateSubnet2Exists
-    Description: NatGateway IP
+    Description: NatGateway IP address
     Value: !GetAtt Az2.Outputs.NatGatewayIP
   NetworkLoadBalancerIP2:
     Condition: AutoScalingEnabled
-    Description: NetworkLoadBalancer IP
+    Description: NetworkLoadBalancer IP address
     Value: !GetAtt Az2.Outputs.NetworkLoadBalancerIP
